@@ -1,0 +1,92 @@
+{
+  "name": "alloy",
+  "publisher": "aditya-anand",
+  "displayName": "Alloy",
+  "description": "My AI Debugger",
+  "icon": "media/logo.png",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.96.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [],
+  "main": "./out/extension.js",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Adiii1436/alloy.git"
+  },
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "ai-programmer-sidebar",
+          "title": "Alloy",
+          "icon": "media/logo_128.svg"
+        }
+      ]
+    },
+    "views": {
+      "ai-programmer-sidebar": [
+        {
+          "icon": "$(rocket)",
+          "id": "ai-programmer-view",
+          "name": "Quick Actions"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "alloy.analyze",
+        "title": "Alloy: Analyze Code"
+      },
+      {
+        "command": "alloy.fixError",
+        "title": "Alloy: Fix Error"
+      },
+      {
+        "command": "alloy.explainCode",
+        "title": "Alloy: Explain Code"
+      },
+      {
+        "command": "alloy.optimizeCode",
+        "title": "Alloy: Optimize Code"
+      },
+      {
+        "command": "alloy.resetSettings",
+        "title": "Alloy: Reset Settings"
+      },
+      {
+        "command": "alloy.manageIgnores",
+        "title": "Alloy: Manage Ignore List"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile && npm run lint",
+    "lint": "eslint src",
+    "test": "vscode-test"
+  },
+  "devDependencies": {
+    "@types/async-retry": "^1.4.9",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "20.x",
+    "@types/vscode": "^1.96.0",
+    "@typescript-eslint/eslint-plugin": "^8.17.0",
+    "@typescript-eslint/parser": "^8.17.0",
+    "@vscode/test-cli": "^0.0.10",
+    "@vscode/test-electron": "^2.4.1",
+    "eslint": "^9.16.0",
+    "typescript": "^5.7.2"
+  },
+  "dependencies": {
+    "@google/generative-ai": "^0.24.1",
+    "glob": "^13.0.0",
+    "minimatch": "^10.1.1",
+    "openai": "^6.15.0"
+  }
+}
