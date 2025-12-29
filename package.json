@@ -1,7 +1,7 @@
 {
   "name": "alloy",
   "publisher": "aditya-anand",
-  "displayName": "Alloy",
+  "displayName": "Alloy AI",
   "description": "My AI Debugger",
   "icon": "media/logo.png",
   "version": "0.0.1",
@@ -22,7 +22,7 @@
       "activitybar": [
         {
           "id": "ai-programmer-sidebar",
-          "title": "Alloy",
+          "title": "Alloy AI",
           "icon": "media/logo_128.svg"
         }
       ]
