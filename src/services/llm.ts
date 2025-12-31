@@ -24,7 +24,7 @@ export async function getLLMConfig(): Promise<LLMConfig | null> {
     const modelStorageName = provider === 'Google Gemini' ? 'gemini_model' : 'openai_model';
     let modelName = GlobalState.context.globalState.get<string>(modelStorageName);
     if (!modelName) {
-        const defaultModel = provider === 'Google Gemini' ? 'gemini-1.5-flash' : 'gpt-4o';
+        const defaultModel = provider === 'Google Gemini' ? 'gemini-3-flash-preview' : 'gpt-4o';
         modelName = await vscode.window.showInputBox({ prompt: `Enter Model Name`, value: defaultModel });
         if (!modelName) return null;
         await GlobalState.context.globalState.update(modelStorageName, modelName);

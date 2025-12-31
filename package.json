@@ -4,7 +4,7 @@
   "displayName": "Alloy AI",
   "description": "My AI Debugger",
   "icon": "media/logo.png",
-  "version": "0.0.1",
+  "version": "0.0.3",
   "engines": {
     "vscode": "^1.96.0"
   },
