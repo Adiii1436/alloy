@@ -6,17 +6,21 @@ import { getLLMConfig, callLlm } from '../services/llm';
 import { getTerminalOutput, getDiagnosticsData, getReferencedCode, applyFix, showDiffView } from '../utils/vscodeUtils';
 import { getWebviewContent } from '../ui/webview';
 
+function compressLog(text: string): string {
+    const MAX_LENGTH = 2000;
+
+    if (text.length <= MAX_LENGTH) return text;
+
+    const head = text.substring(0, 800);
+    const tail = text.substring(text.length - 1000);
+
+    return `${head}\n\n... [${text.length - 1800} chars of logs truncated by Alloy] ...\n\n${tail}`;
+}
+
 function extractLatestOutput(fullText: string): string {
     if (!fullText) return "";
-
-    // Split into lines
     const lines = fullText.split(/\r?\n/);
     if (lines.length < 2) return fullText;
-
-    // We scan BACKWARDS from the bottom.
-    // 1. Identify the 'active' prompt at the very bottom (usually empty or cursor)
-    // 2. Continue scanning up until we hit the PREVIOUS prompt.
-    // 3. Everything in between is the "Latest Output".
 
     const promptRegex = /^(PS .*>|.+@.+:.+[#$]|➜.+|bash-.*\$|[a-zA-Z]:\\.*>)/;
 
@@ -38,7 +42,6 @@ function extractLatestOutput(fullText: string): string {
     if (previousPromptIndex !== -1) {
         return lines.slice(previousPromptIndex + 1).join('\n');
     }
-
     return lines.slice(-30).join('\n');
 }
 
@@ -108,13 +111,13 @@ export async function runAnalysisFlow(intent: AnalysisIntent) {
         let extraContext = "";
 
         if (intent === 'fix') {
-            // Use the FILTERED output for context too, so AI doesn't get confused by old errors
+            // 1. Get RAW content
             const fullLog = await getTerminalOutput();
-            terminalOutput = extractLatestOutput(fullLog);
-            if (terminalOutput.length < 50) {
-                // Fallback: If extraction was too aggressive (empty), allow a bit more context
-                terminalOutput = fullLog.substring(fullLog.length - 2000);
-            }
+
+            let rawLatest = extractLatestOutput(fullLog);
+            if (rawLatest.length < 50) rawLatest = fullLog.substring(fullLog.length - 2000);
+
+            terminalOutput = compressLog(rawLatest);
 
             diagnosticsOutput = getDiagnosticsData(document.uri);
             combinedErrorLog = terminalOutput + "\n" + diagnosticsOutput;
@@ -162,16 +165,13 @@ export async function runAnalysisFlow(intent: AnalysisIntent) {
         if (intent === 'explain') {
             const panel = vscode.window.createWebviewPanel('aiOutput', 'Alloy Insights', vscode.ViewColumn.Beside, {});
             panel.webview.html = getWebviewContent('Code Explanation', aiResponse.explanation);
-
         } else if (intent === 'optimize') {
-            if (aiResponse.fixedCode) {
-                await showDiffView(targetUri, aiResponse.fixedCode);
-            } else {
+            if (aiResponse.fixedCode) await showDiffView(targetUri, aiResponse.fixedCode);
+            else {
                 vscode.window.showInformationMessage('AI suggestions included in explanation panel.');
                 const panel = vscode.window.createWebviewPanel('aiOutput', 'Optimization Tips', vscode.ViewColumn.Beside, {});
                 panel.webview.html = getWebviewContent('Optimization Advice', aiResponse.explanation);
             }
-
         } else if (intent === 'fix') {
             if (aiResponse.filePath && aiResponse.filePath.toLowerCase() !== 'unknown') {
                 const aiFileName = path.basename(aiResponse.filePath);
@@ -180,13 +180,9 @@ export async function runAnalysisFlow(intent: AnalysisIntent) {
                     if (files.length > 0) targetUri = files[0];
                 }
             }
-
             const fixAction = await vscode.window.showQuickPick(['Directly Apply Fix', 'Verify Fix First'], { placeHolder: 'Fix found. Proceed?' });
-            if (fixAction === 'Directly Apply Fix') {
-                await applyFix(targetUri, aiResponse.fixedCode);
-            } else if (fixAction === 'Verify Fix First') {
-                await showDiffView(targetUri, aiResponse.fixedCode);
-            }
+            if (fixAction === 'Directly Apply Fix') await applyFix(targetUri, aiResponse.fixedCode);
+            else if (fixAction === 'Verify Fix First') await showDiffView(targetUri, aiResponse.fixedCode);
         }
 
     } catch (error) {
