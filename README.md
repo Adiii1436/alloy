@@ -37,7 +37,7 @@ Your project structure is analyzed locally on your machine.
 
 ### 1. Installation
 
-Install Alloy from the VS Code Marketplace.
+Install Alloy from the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=aditya-anand.alloyai).
 
 ### 2. Let it scan
 
