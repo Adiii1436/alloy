@@ -17,12 +17,12 @@ export function activate(context: vscode.ExtensionContext) {
 	const sidebarProvider = new AIActionProvider();
 	vscode.window.registerTreeDataProvider('ai-programmer-view', sidebarProvider);
 
-	context.subscriptions.push(vscode.commands.registerCommand('alloy.analyze', async () => await runAnalysisFlow('explain')));
-	context.subscriptions.push(vscode.commands.registerCommand('alloy.fixError', async () => await runAnalysisFlow('fix')));
-	context.subscriptions.push(vscode.commands.registerCommand('alloy.explainCode', async () => await runAnalysisFlow('explain')));
-	context.subscriptions.push(vscode.commands.registerCommand('alloy.optimizeCode', async () => await runAnalysisFlow('optimize')));
-	context.subscriptions.push(vscode.commands.registerCommand('alloy.manageIgnores', async () => await manageIgnoreList()));
-	context.subscriptions.push(vscode.commands.registerCommand('alloy.resetSettings', async () => await handleResetSettings()));
+	context.subscriptions.push(vscode.commands.registerCommand('alloyai.analyze', async () => await runAnalysisFlow('explain')));
+	context.subscriptions.push(vscode.commands.registerCommand('alloyai.fixError', async () => await runAnalysisFlow('fix')));
+	context.subscriptions.push(vscode.commands.registerCommand('alloyai.explainCode', async () => await runAnalysisFlow('explain')));
+	context.subscriptions.push(vscode.commands.registerCommand('alloyai.optimizeCode', async () => await runAnalysisFlow('optimize')));
+	context.subscriptions.push(vscode.commands.registerCommand('alloyai.manageIgnores', async () => await manageIgnoreList()));
+	context.subscriptions.push(vscode.commands.registerCommand('alloyai.resetSettings', async () => await handleResetSettings()));
 }
 
 export function deactivate() { }

@@ -4,7 +4,7 @@
   "displayName": "Alloy AI",
   "description": "My AI Debugger",
   "icon": "media/logo.png",
-  "version": "0.0.3",
+  "version": "0.0.5",
   "engines": {
     "vscode": "^1.96.0"
   },
@@ -38,27 +38,27 @@
     },
     "commands": [
       {
-        "command": "alloy.analyze",
+        "command": "alloyai.analyze",
         "title": "Alloy: Analyze Code"
       },
       {
-        "command": "alloy.fixError",
+        "command": "alloyai.fixError",
         "title": "Alloy: Fix Error"
       },
       {
-        "command": "alloy.explainCode",
+        "command": "alloyai.explainCode",
         "title": "Alloy: Explain Code"
       },
       {
-        "command": "alloy.optimizeCode",
+        "command": "alloyai.optimizeCode",
         "title": "Alloy: Optimize Code"
       },
       {
-        "command": "alloy.resetSettings",
+        "command": "alloyai.resetSettings",
         "title": "Alloy: Reset Settings"
       },
       {
-        "command": "alloy.manageIgnores",
+        "command": "alloyai.manageIgnores",
         "title": "Alloy: Manage Ignore List"
       }
     ]
