@@ -80,7 +80,25 @@ export async function getReferencedCode(log: string): Promise<{ filename: string
 }
 
 export async function showDiffView(uri: vscode.Uri, newContent: string) {
-    const doc = await vscode.workspace.openTextDocument(uri);
+    try {
+        const doc = await vscode.workspace.openTextDocument(uri);
+        const languageId = doc.languageId;
+
+        const newDoc = await vscode.workspace.openTextDocument({
+            content: newContent,
+            language: languageId
+        });
+
+        await vscode.commands.executeCommand(
+            'vscode.diff',
+            uri,            // Left Side: Original File (Active on disk)
+            newDoc.uri,     // Right Side: Optimized Code (Virtual)
+            `Alloy Optimization: ${path.basename(uri.fsPath)} ↔ Proposed Change`
+        );
+
+    } catch (error) {
+        vscode.window.showErrorMessage(`Failed to open diff view: ${error}`);
+    }
 }
 
 export async function applyFix(uri: vscode.Uri, newContent: string) {

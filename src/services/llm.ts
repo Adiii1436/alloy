@@ -24,66 +24,105 @@ export async function getLLMConfig(): Promise<LLMConfig | null> {
     const modelStorageName = provider === 'Google Gemini' ? 'gemini_model' : 'openai_model';
     let modelName = GlobalState.context.globalState.get<string>(modelStorageName);
     if (!modelName) {
-        const defaultModel = provider === 'Google Gemini' ? 'gemini-3-flash-preview' : 'gpt-4o';
-        modelName = await vscode.window.showInputBox({ prompt: `Enter Model Name`, value: defaultModel });
-        if (!modelName) return null;
+        modelName = provider === 'Google Gemini' ? 'gemini-2.5-flash' : 'gpt-4o';
         await GlobalState.context.globalState.update(modelStorageName, modelName);
     }
+
     return { provider, apiKey, modelName };
 }
 
-export async function callLlm(config: LLMConfig, contextData: string, intent: AnalysisIntent) {
-    let taskInstruction = "";
-    if (intent === 'fix') {
-        taskInstruction = `1. Analyze Terminal Output/Files. 2. Identify root cause. 3. Generate FULL FIXED CODE.`;
-    } else if (intent === 'optimize') {
-        taskInstruction = `1. Analyze Current File. 2. Refactor for performance/security. 3. Generate FULL OPTIMIZED CODE.`;
-    } else if (intent === 'explain') {
-        taskInstruction = `1. Explain code structure/logic. 2. Focus on "Why" and "How".`;
-    }
+export async function callLlm(config: LLMConfig, prompt: string, intent: AnalysisIntent): Promise<AIResponse> {
 
-    const systemPrompt = `
-    You are Alloy, an advanced AI Pair Debugger. 
-    Your goal is to Fix, Explain, or Optimize code.
+    const BASE_ROLE = "You are Alloy, an advanced AI Pair Debugger.";
 
-    CRITICAL INSTRUCTION FOR FIXING CODE:
-    You are working in a real file system. A bug might span MULTIPLE files.
+    const CODE_FORMAT_INSTRUCTION = `
+    CRITICAL INSTRUCTION:
+    You are working in a real file system.
     If you need to edit multiple files, provide a block for EACH file.
 
     RESPONSE FORMAT:
-    1. Start with a brief explanation.
-    2. For every file change, use this EXACT format:
+    For every file change, use this EXACT format:
 
     <<<<FILE: path/to/file.ext>>>>
-    [Full content of the file]
+    [FULL SOURCE CODE HERE]
     <<<<END>>>>
 
-    <<<<FILE: path/to/another_file.ext>>>>
-    [Full content of the file]
+    <<<<FILE: path/to/file.ext>>>>
+    [FULL SOURCE CODE HERE]
     <<<<END>>>>
 
-    DO NOT use Markdown code blocks (\`\`\`).
-    DO NOT skip code. Provide the FULL FILE CONTENT.
+    RULES FOR THE CODE BLOCK:
+    1. Provide the FULL content of the file. DO NOT skip lines.
+    2. Inside <<<<FILE>>>> and <<<<END>>>>, contain ONLY valid code.
+    3. DO NOT write "Here is the code:" or markdown backticks (\`\`\`) inside the block.
     `;
 
-    const userPrompt = `DATA:\n${contextData}\n\nOUTPUT FORMAT:\n<<<<FILEPATH>>>>\n(Filename or "Unknown")\n<<<<EXPLANATION>>>>\n(Markdown)\n<<<<CODE>>>>\n(Full code content)`;
+    let systemInstruction = "";
+
+    switch (intent) {
+        case 'fix':
+            systemInstruction = `
+            ${BASE_ROLE}
+            Your goal is to FIX bugs, resolve errors, or handle crashes.
+
+            INSTRUCTIONS:
+            1. Analyze the provided error logs and source code.
+            2. Identify the root cause.
+            3. Provide a COMPLETE fix for all affected files.
+            4. Start your response with a concise summary of the bug (1-2 sentences).
+
+            ${CODE_FORMAT_INSTRUCTION}
+            `;
+            break;
+
+        case 'optimize':
+            systemInstruction = `
+            ${BASE_ROLE}
+            Your goal is to OPTIMIZE code for performance, readability, and best practices.
+
+            INSTRUCTIONS:
+            1. Improve Time or Space complexity where possible.
+            2. Refactor for cleaner logic and better naming.
+            3. Remove redundant code.
+            4. DO NOT change the core functionality, only improve the implementation.
+            5. MINIMIZE explanation. The user wants to see the code Diff immediately.
+
+            ${CODE_FORMAT_INSTRUCTION}
+            `;
+            break;
+
+        case 'explain':
+            systemInstruction = `
+            ${BASE_ROLE}
+            Your goal is to EXPLAIN the provided code clearly and educationally.
+
+            INSTRUCTIONS:
+            1. Target your explanation to a professional developer.
+            2. Break down complex logic.
+            3. Explain *why* the code is written this way.
+            4. Use Markdown formatting (Bold, Lists, Code Blocks) for readability.
+            5. Do NOT use the special <<<<FILE>>>> format unless providing a specific refactoring example.
+            `;
+            break;
+    }
 
     let responseText = "";
-
     try {
         if (config.provider === 'Google Gemini') {
             const genAI = new GoogleGenerativeAI(config.apiKey);
-            const model = genAI.getGenerativeModel({ model: config.modelName });
-            const result = await model.generateContent(systemPrompt + "\n" + userPrompt);
+            const model = genAI.getGenerativeModel({ model: config.modelName, systemInstruction });
+            const result = await model.generateContent(prompt);
             responseText = result.response.text();
-        } else if (config.provider === 'OpenAI') {
+        } else {
             const openai = new OpenAI({ apiKey: config.apiKey });
             const completion = await openai.chat.completions.create({
+                messages: [
+                    { role: "system", content: systemInstruction },
+                    { role: "user", content: prompt }
+                ],
                 model: config.modelName,
-                messages: [{ role: "system", content: systemPrompt }, { role: "user", content: userPrompt }],
-                temperature: 0.1,
             });
-            responseText = completion.choices[0].message.content || "";
+            responseText = completion.choices[0]?.message?.content || "";
         }
     } catch (e: any) {
         if (e.toString().includes('401') || e.toString().includes('invalid api key')) {
@@ -126,8 +165,19 @@ function parseBlockResponse(text: string): AIResponse {
         explanationParts.push(text.substring(lastIndex).trim());
     }
 
+    // Legacy fallback for single-file responses (just in case)
+    if (fixes.length === 0) {
+        const legacyCode = text.split('<<<<CODE>>>>')[1];
+        if (legacyCode) {
+            fixes.push({
+                filePath: "ActiveFile",
+                newContent: legacyCode.split('<<<<')[0].trim()
+            });
+        }
+    }
+
     return {
-        explanation: explanationParts.join('\n\n') || text, // Fallback if no blocks found
+        explanation: explanationParts.join('\n\n') || text,
         fixes
     };
 }
