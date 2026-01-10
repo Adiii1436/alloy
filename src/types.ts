@@ -6,3 +6,13 @@ export interface LLMConfig {
     apiKey: string;
     modelName: string;
 }
+
+export interface FileChange {
+    filePath: string;
+    newContent: string;
+}
+
+export interface AIResponse {
+    explanation: string;
+    fixes: FileChange[];
+}

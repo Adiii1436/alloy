@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import OpenAI from 'openai';
 import { GlobalState } from '../globalState';
-import { LLMConfig, AIProvider, AnalysisIntent } from '../types';
+import { LLMConfig, AIProvider, AnalysisIntent, AIResponse, FileChange } from '../types';
 
 export async function getLLMConfig(): Promise<LLMConfig | null> {
     let provider = GlobalState.context.globalState.get<AIProvider>('selected_provider');
@@ -42,7 +42,30 @@ export async function callLlm(config: LLMConfig, contextData: string, intent: An
         taskInstruction = `1. Explain code structure/logic. 2. Focus on "Why" and "How".`;
     }
 
-    const systemPrompt = `You are Alloy, an expert AI Pair Developer. TASK: ${taskInstruction} IMPORTANT: If generating code, output filename in <<<<FILEPATH>>>>. Output format must be strictly followed.`;
+    const systemPrompt = `
+    You are Alloy, an advanced AI Pair Debugger. 
+    Your goal is to Fix, Explain, or Optimize code.
+
+    CRITICAL INSTRUCTION FOR FIXING CODE:
+    You are working in a real file system. A bug might span MULTIPLE files.
+    If you need to edit multiple files, provide a block for EACH file.
+
+    RESPONSE FORMAT:
+    1. Start with a brief explanation.
+    2. For every file change, use this EXACT format:
+
+    <<<<FILE: path/to/file.ext>>>>
+    [Full content of the file]
+    <<<<END>>>>
+
+    <<<<FILE: path/to/another_file.ext>>>>
+    [Full content of the file]
+    <<<<END>>>>
+
+    DO NOT use Markdown code blocks (\`\`\`).
+    DO NOT skip code. Provide the FULL FILE CONTENT.
+    `;
+
     const userPrompt = `DATA:\n${contextData}\n\nOUTPUT FORMAT:\n<<<<FILEPATH>>>>\n(Filename or "Unknown")\n<<<<EXPLANATION>>>>\n(Markdown)\n<<<<CODE>>>>\n(Full code content)`;
 
     let responseText = "";
@@ -72,33 +95,39 @@ export async function callLlm(config: LLMConfig, contextData: string, intent: An
     return parseBlockResponse(responseText);
 }
 
-function parseBlockResponse(text: string) {
-    const filePart = text.split('<<<<FILEPATH>>>>')[1];
-    const explainPart = text.split('<<<<EXPLANATION>>>>')[1];
-    const codePart = text.split('<<<<CODE>>>>')[1];
+function parseBlockResponse(text: string): AIResponse {
+    const fixes: FileChange[] = [];
+    const explanationParts: string[] = [];
 
-    let filePath = "Unknown";
-    let explanation = "";
-    let fixedCode = "";
+    const fileBlockRegex = /<<<<FILE:\s*([^\n>]+)>>>>([\s\S]*?)<<<<END>>>>/g;
 
-    if (filePart) filePath = filePart.split('<<<<')[0].trim();
-    if (explainPart) explanation = explainPart.split('<<<<')[0].trim();
-    if (codePart) {
-        fixedCode = codePart.split('<<<<')[0].trim();
-        fixedCode = fixedCode.replace(/^```[a-z]*\n/i, '').replace(/\n```$/, '');
-    }
+    let lastIndex = 0;
+    let match;
 
-    if (!explanation && !fixedCode) {
-        if (text.trim().startsWith("```") || (text.includes("import ") && text.includes("class ") && !text.includes(" "))) {
-            fixedCode = text.replace(/^```[a-z]*\n/i, '').replace(/\n```$/, '');
-            explanation = "AI provided direct code fix.";
-        } else {
-            explanation = text;
+    while ((match = fileBlockRegex.exec(text)) !== null) {
+        // Capture text occurring BEFORE this code block as part of the explanation
+        if (match.index > lastIndex) {
+            explanationParts.push(text.substring(lastIndex, match.index).trim());
         }
-    } else if (!explanation && !codePart) {
-        explanation = text;
-    }
-    if (!explanation) explanation = "No explanation provided.";
 
-    return { filePath, explanation, fixedCode };
+        const rawPath = match[1].trim();
+        const content = match[2].trim();
+
+        fixes.push({
+            filePath: rawPath,
+            newContent: content
+        });
+
+        lastIndex = match.index + match[0].length;
+    }
+
+    // Capture any remaining explanation text after the last code block
+    if (lastIndex < text.length) {
+        explanationParts.push(text.substring(lastIndex).trim());
+    }
+
+    return {
+        explanation: explanationParts.join('\n\n') || text, // Fallback if no blocks found
+        fixes
+    };
 }
