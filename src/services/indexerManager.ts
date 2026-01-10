@@ -14,7 +14,7 @@ export async function initializeIndexer(force = false) {
             title: "Rebuilding Codebase Index...",
             cancellable: false
         }, async () => { await GlobalState.indexer?.refreshIndex(); });
-        vscode.window.showInformationMessage('✅ Codebase Index rebuilt.');
+        vscode.window.showInformationMessage('Codebase Index rebuilt.');
     } else {
         vscode.window.setStatusBarMessage("AI: Indexing Codebase...", 3000);
         GlobalState.indexer.refreshIndex().then(() => { GlobalState.lastIndexTime = Date.now(); });

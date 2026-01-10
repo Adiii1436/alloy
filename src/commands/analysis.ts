@@ -3,64 +3,29 @@ import * as path from 'path';
 import { GlobalState } from '../globalState';
 import { AnalysisIntent } from '../types';
 import { getLLMConfig, callLlm } from '../services/llm';
-import { getTerminalOutput, getDiagnosticsData, getReferencedCode, applyFix, showDiffView } from '../utils/vscodeUtils';
+import { getTerminalOutput, getDiagnosticsData, getReferencedCode, applyFix, showDiffView, applyCompositeFix } from '../utils/vscodeUtils';
 import { getWebviewContent } from '../ui/webview';
 
 function compressLog(text: string): string {
     const MAX_LENGTH = 2000;
-
     if (text.length <= MAX_LENGTH) return text;
-
-    const head = text.substring(0, 800);
-    const tail = text.substring(text.length - 1000);
-
-    return `${head}\n\n... [${text.length - 1800} chars of logs truncated by Alloy] ...\n\n${tail}`;
+    return `${text.substring(0, 800)}\n\n... [${text.length - 1800} chars truncated] ...\n\n${text.substring(text.length - 1000)}`;
 }
 
 function extractLatestOutput(fullText: string): string {
     if (!fullText) return "";
     const lines = fullText.split(/\r?\n/);
     if (lines.length < 2) return fullText;
-
     const promptRegex = /^(PS .*>|.+@.+:.+[#$]|➜.+|bash-.*\$|[a-zA-Z]:\\.*>)/;
 
     let lastPromptIndex = -1;
-    let previousPromptIndex = -1;
-
     for (let i = lines.length - 1; i >= 0; i--) {
-        const line = lines[i].trim();
-        if (line.length > 0 && promptRegex.test(line)) {
-            if (lastPromptIndex === -1) {
-                lastPromptIndex = i;
-            } else {
-                previousPromptIndex = i;
-                break;
-            }
+        if (lines[i].trim().length > 0 && promptRegex.test(lines[i])) {
+            if (lastPromptIndex === -1) lastPromptIndex = i;
+            else return lines.slice(i + 1).join('\n');
         }
     }
-
-    if (previousPromptIndex !== -1) {
-        return lines.slice(previousPromptIndex + 1).join('\n');
-    }
     return lines.slice(-30).join('\n');
-}
-
-function hasTerminalError(text: string): boolean {
-    if (!text) return false;
-    const lowerText = text.toLowerCase();
-
-    const errorKeywords = [
-        'error', 'exception', 'traceback', 'failed', 'fatal', 'panic', 'crash', 'abort',
-        'undefined', 'uncaught', 'typeerror', 'referenceerror', 'syntaxerror',
-        'segmentation fault', 'segfault', 'core dumped', 'exit status 1',
-        'ora-', 'sql state', 'build failed', 'err!', 'exited with code',
-        'keyboardinterrupt', 'systemexit'
-    ];
-
-    const hasKeyword = errorKeywords.some(keyword => lowerText.includes(keyword));
-    const hasStackTrace = /[\w\-]+\.[a-zA-Z0-9]{1,5}[:,\s]+(line\s+)?\d+/.test(text);
-
-    return hasKeyword || hasStackTrace;
 }
 
 export async function runAnalysisFlow(intent: AnalysisIntent) {
@@ -74,27 +39,9 @@ export async function runAnalysisFlow(intent: AnalysisIntent) {
     }
     const document = editor.document;
 
-    if (intent === 'fix') {
-        const allDiagnostics = vscode.languages.getDiagnostics();
-        const hasProblems = allDiagnostics.some(([uri, diags]) =>
-            diags.some(d => d.severity === vscode.DiagnosticSeverity.Error)
-        );
-
-        const fullTerminalOutput = await getTerminalOutput();
-        const latestOutput = extractLatestOutput(fullTerminalOutput);
-        const hasTerminalContent = hasTerminalError(latestOutput);
-
-        if (!hasProblems && !hasTerminalContent) {
-            vscode.window.showWarningMessage('Alloy: No active crashes detected in the last run.');
-            return;
-        }
-    }
-
     const sourceCode = document.getText();
-    const actionMsg = intent === 'fix' ? 'Fixing' : intent === 'optimize' ? 'Optimizing' : 'Explaining';
-
     if (GlobalState.statusBarItem) {
-        GlobalState.statusBarItem.text = `$(sync~spin) Alloy: ${actionMsg}...`;
+        GlobalState.statusBarItem.text = `$(sync~spin) Alloy: Analyzing...`;
         GlobalState.statusBarItem.show();
     }
 
@@ -104,42 +51,23 @@ export async function runAnalysisFlow(intent: AnalysisIntent) {
             GlobalState.lastIndexTime = Date.now();
         }
 
-        let terminalOutput = "";
-        let diagnosticsOutput = "";
         let combinedErrorLog = "";
         let targetUri = document.uri;
         let extraContext = "";
 
         if (intent === 'fix') {
-            // 1. Get RAW content
             const fullLog = await getTerminalOutput();
+            const terminalOutput = compressLog(extractLatestOutput(fullLog));
 
-            let rawLatest = extractLatestOutput(fullLog);
-            if (rawLatest.length < 50) rawLatest = fullLog.substring(fullLog.length - 2000);
-
-            terminalOutput = compressLog(rawLatest);
-
-            diagnosticsOutput = getDiagnosticsData(document.uri);
+            // Scan for errors in ALL files (Global Diagnostics)
+            const diagnosticsOutput = getDiagnosticsData();
             combinedErrorLog = terminalOutput + "\n" + diagnosticsOutput;
 
+            // Try to identify the broken file from stack trace
             let referencedFile = await getReferencedCode(terminalOutput);
-            if (!referencedFile) {
-                const allDiagnostics = vscode.languages.getDiagnostics();
-                for (const [uri, diagnostics] of allDiagnostics) {
-                    if (diagnostics.some(d => d.severity === vscode.DiagnosticSeverity.Error)) {
-                        try {
-                            const doc = await vscode.workspace.openTextDocument(uri);
-                            referencedFile = { filename: path.basename(uri.fsPath), fullPath: uri.fsPath, content: doc.getText() };
-                            break;
-                        } catch (e) { }
-                    }
-                }
-            }
-
             if (referencedFile) {
-                vscode.window.showInformationMessage(`🧠 Analyzed context from: ${referencedFile.filename}`);
                 targetUri = vscode.Uri.file(referencedFile.fullPath);
-                extraContext += `\nBROKEN FILE CONTENT (${referencedFile.filename}):\n${referencedFile.content}\n`;
+                extraContext += `\nBROKEN FILE (${referencedFile.filename}):\n${referencedFile.content}\n`;
             }
         }
 
@@ -147,42 +75,48 @@ export async function runAnalysisFlow(intent: AnalysisIntent) {
             const query = intent === 'fix' ? combinedErrorLog : sourceCode;
             const retrievedContext = await GlobalState.indexer.findRelevantContext(query + "\n" + sourceCode);
             if (retrievedContext.length > 50) {
-                extraContext += `\n\n=== RELEVANT PROJECT FILES (Auto-Detected) ===\n${retrievedContext}\n`;
+                extraContext += `\n\n=== RELEVANT PROJECT FILES ===\n${retrievedContext}\n`;
             }
         }
 
         const fullContext = `
-        CURRENT ACTIVE FILE (${path.basename(document.fileName)}):
+        ACTIVE FILE (${path.basename(document.fileName)}):
         ${sourceCode}
 
         ${extraContext}
         
-        ${intent === 'fix' ? `TERMINAL / ERROR LOGS:\n${combinedErrorLog}` : ''}
+        ${intent === 'fix' ? `ERROR LOGS:\n${combinedErrorLog}` : ''}
         `;
 
         const aiResponse = await callLlm(config, fullContext, intent);
 
         if (intent === 'explain') {
             const panel = vscode.window.createWebviewPanel('aiOutput', 'Alloy Insights', vscode.ViewColumn.Beside, {});
-            panel.webview.html = getWebviewContent('Code Explanation', aiResponse.explanation);
-        } else if (intent === 'optimize') {
-            if (aiResponse.fixedCode) await showDiffView(targetUri, aiResponse.fixedCode);
-            else {
-                vscode.window.showInformationMessage('AI suggestions included in explanation panel.');
-                const panel = vscode.window.createWebviewPanel('aiOutput', 'Optimization Tips', vscode.ViewColumn.Beside, {});
+            panel.webview.html = getWebviewContent('Explanation', aiResponse.explanation);
+        }
+        else if (intent === 'optimize') {
+            if (aiResponse.fixes.length > 0) {
+                await showDiffView(targetUri, aiResponse.fixes[0].newContent);
+            } else {
+                const panel = vscode.window.createWebviewPanel('aiOutput', 'Optimization', vscode.ViewColumn.Beside, {});
                 panel.webview.html = getWebviewContent('Optimization Advice', aiResponse.explanation);
             }
-        } else if (intent === 'fix') {
-            if (aiResponse.filePath && aiResponse.filePath.toLowerCase() !== 'unknown') {
-                const aiFileName = path.basename(aiResponse.filePath);
-                if (aiFileName !== path.basename(targetUri.fsPath)) {
-                    const files = await vscode.workspace.findFiles(`**/${aiFileName}`, '**/node_modules/**', 1);
-                    if (files.length > 0) targetUri = files[0];
+        }
+        else if (intent === 'fix') {
+            if (aiResponse.fixes.length > 0) {
+                const fileList = aiResponse.fixes.map(f => path.basename(f.filePath)).join(', ');
+
+                const fixAction = await vscode.window.showQuickPick(
+                    ['Apply Fixes'],
+                    { placeHolder: `Fixes found for: ${fileList}. Apply?` }
+                );
+
+                if (fixAction === 'Apply Fixes') {
+                    await applyCompositeFix(aiResponse.fixes);
                 }
+            } else {
+                vscode.window.showWarningMessage('Alloy: AI could not generate a code fix.');
             }
-            const fixAction = await vscode.window.showQuickPick(['Directly Apply Fix', 'Verify Fix First'], { placeHolder: 'Fix found. Proceed?' });
-            if (fixAction === 'Directly Apply Fix') await applyFix(targetUri, aiResponse.fixedCode);
-            else if (fixAction === 'Verify Fix First') await showDiffView(targetUri, aiResponse.fixedCode);
         }
 
     } catch (error) {
