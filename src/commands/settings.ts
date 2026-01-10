@@ -74,6 +74,6 @@ export async function handleResetSettings() {
         await GlobalState.context.globalState.update('gemini_key', undefined);
         await GlobalState.context.globalState.update('openai_key', undefined);
         await GlobalState.context.workspaceState.update('custom_ignores', undefined);
-        vscode.window.showInformationMessage('⚠️ Alloy has been factory reset.');
+        vscode.window.showInformationMessage('Alloy has been factory reset.');
     }
 }
