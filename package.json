@@ -2,14 +2,17 @@
   "name": "alloyai",
   "publisher": "aditya-anand",
   "displayName": "Alloy AI",
-  "description": "My AI Debugger",
+  "description": "Debugging made easy",
   "icon": "media/logo.png",
-  "version": "0.0.9",
+  "version": "1.0.0",
   "engines": {
     "vscode": "^1.96.0"
   },
   "categories": [
-    "Other"
+    "Debuggers",
+    "AI",
+    "Formatters",
+    "Testing"
   ],
   "activationEvents": [],
   "main": "./out/extension.js",
@@ -30,17 +33,14 @@
     "views": {
       "ai-programmer-sidebar": [
         {
-          "icon": "$(rocket)",
-          "id": "ai-programmer-view",
-          "name": "Quick Actions"
+          "type": "webview",
+          "id": "agentChat.chatView",
+          "name": "DEBUG NOW",
+          "icon": "$(comment-discussion)"
         }
       ]
     },
     "commands": [
-      {
-        "command": "alloyai.analyze",
-        "title": "Alloy: Analyze Code"
-      },
       {
         "command": "alloyai.fixError",
         "title": "Alloy: Fix Error"
@@ -50,16 +50,16 @@
         "title": "Alloy: Explain Code"
       },
       {
-        "command": "alloyai.optimizeCode",
-        "title": "Alloy: Optimize Code"
-      },
-      {
         "command": "alloyai.resetSettings",
         "title": "Alloy: Reset Settings"
       },
       {
         "command": "alloyai.manageIgnores",
         "title": "Alloy: Manage Ignore List"
+      },
+      {
+        "command": "alloyai.openChat",
+        "title": "Alloy: Open Debug Chat"
       }
     ]
   },
@@ -84,6 +84,7 @@
     "typescript": "^5.7.2"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.71.2",
     "@google/generative-ai": "^0.24.1",
     "glob": "^13.0.0",
     "minimatch": "^10.1.1",

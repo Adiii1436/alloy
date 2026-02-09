@@ -25,18 +25,17 @@ export async function manageIgnoreList() {
     quickPick.onDidAccept(async () => {
         const selection = quickPick.selectedItems[0];
         if (!selection) return;
-        quickPick.hide();
         if (selection.type === 'add') {
-            const newList = [...currentIgnores, selection.value];
-            await GlobalState.context.workspaceState.update('custom_ignores', newList);
-            await initializeIndexer(true);
-            vscode.window.showInformationMessage(`Added "${selection.value}" to ignore list.`);
-        } else if (selection.type === 'remove') {
-            const newList = currentIgnores.filter(p => p !== selection.value);
-            await GlobalState.context.workspaceState.update('custom_ignores', newList);
-            await initializeIndexer(true);
-            vscode.window.showInformationMessage(`Removed "${selection.value}" from ignore list.`);
+            currentIgnores.push(selection.value);
+            vscode.window.showInformationMessage(`Added ignore rule: ${selection.value}`);
+        } else {
+            const index = currentIgnores.indexOf(selection.value);
+            if (index > -1) currentIgnores.splice(index, 1);
+            vscode.window.showInformationMessage(`Removed ignore rule: ${selection.value}`);
         }
+        await GlobalState.context.workspaceState.update('custom_ignores', currentIgnores);
+        quickPick.value = '';
+        updateItems();
     });
     quickPick.show();
 }
@@ -45,10 +44,10 @@ export async function handleResetSettings() {
     const choice = await vscode.window.showQuickPick(
         [
             { label: '$(arrow-swap) Switch AI Provider', id: 'switch_provider' },
-            { label: '$(settings) Change Model', id: 'change_model' },
-            { label: '$(key) Reset API Key', id: 'reset_key' },
-            { label: '$(database) Rebuild Index', id: 'index' },
-            { label: '$(list-flat) Manage Ignore List', id: 'ignore' },
+            { label: '$(edit) Change Model', id: 'change_model' },
+            { label: '$(key) Update API Key', id: 'reset_key' },
+            { label: '$(list-unordered) Manage Ignore List', id: 'ignore' },
+            { label: '$(refresh) Re-Index Codebase', id: 'index' },
             { label: '$(trash) Factory Reset', id: 'all' }
         ],
         { placeHolder: 'Alloy Settings' }
@@ -57,15 +56,27 @@ export async function handleResetSettings() {
 
     if (choice.id === 'switch_provider') {
         await GlobalState.context.globalState.update('selected_provider', undefined);
-        vscode.window.showInformationMessage('Provider selection cleared.');
+        vscode.window.showInformationMessage('Provider selection cleared. Run any command to select again.');
     }
     if (choice.id === 'change_model') {
         const provider = GlobalState.context.globalState.get<AIProvider>('selected_provider');
-        if (provider) await GlobalState.context.globalState.update(provider === 'Google Gemini' ? 'gemini_model' : 'openai_model', undefined);
+        if (provider) {
+            let key = 'openai_model';
+            if (provider === 'Google Gemini') key = 'gemini_model';
+            if (provider === 'Claude') key = 'claude_model';
+            await GlobalState.context.globalState.update(key, undefined);
+            vscode.window.showInformationMessage(`Model setting cleared for ${provider}.`);
+        }
     }
     if (choice.id === 'reset_key') {
         const provider = GlobalState.context.globalState.get<AIProvider>('selected_provider');
-        if (provider) await GlobalState.context.globalState.update(provider === 'Google Gemini' ? 'gemini_key' : 'openai_key', undefined);
+        if (provider) {
+            let key = 'openai_key';
+            if (provider === 'Google Gemini') key = 'gemini_key';
+            if (provider === 'Claude') key = 'anthropic_key';
+            await GlobalState.context.globalState.update(key, undefined);
+            vscode.window.showInformationMessage(`API Key cleared for ${provider}.`);
+        }
     }
     if (choice.id === 'ignore') await manageIgnoreList();
     if (choice.id === 'index') await initializeIndexer(true);
@@ -73,6 +84,10 @@ export async function handleResetSettings() {
         await GlobalState.context.globalState.update('selected_provider', undefined);
         await GlobalState.context.globalState.update('gemini_key', undefined);
         await GlobalState.context.globalState.update('openai_key', undefined);
+        await GlobalState.context.globalState.update('anthropic_key', undefined);
+        await GlobalState.context.globalState.update('gemini_model', undefined);
+        await GlobalState.context.globalState.update('openai_model', undefined);
+        await GlobalState.context.globalState.update('claude_model', undefined);
         await GlobalState.context.workspaceState.update('custom_ignores', undefined);
         vscode.window.showInformationMessage('Alloy has been factory reset.');
     }
