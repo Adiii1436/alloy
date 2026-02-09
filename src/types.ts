@@ -1,5 +1,5 @@
-export type AIProvider = 'Google Gemini' | 'OpenAI';
-export type AnalysisIntent = 'fix' | 'explain' | 'optimize';
+export type AIProvider = 'Google Gemini' | 'OpenAI' | 'Claude';
+export type AnalysisIntent = 'fix' | 'explain';
 
 export interface LLMConfig {
     provider: AIProvider;

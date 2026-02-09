@@ -9,15 +9,28 @@ const SYSTEM_IGNORES = [
 ];
 
 export async function getTerminalOutput(): Promise<string> {
-    await vscode.commands.executeCommand('workbench.action.terminal.selectAll');
-    await vscode.commands.executeCommand('workbench.action.terminal.copySelection');
-    await vscode.commands.executeCommand('workbench.action.terminal.clearSelection');
-    return await vscode.env.clipboard.readText();
+    // ROBUSTNESS: Save user's current clipboard content
+    const previousClipboard = await vscode.env.clipboard.readText();
+
+    try {
+        await vscode.commands.executeCommand('workbench.action.terminal.selectAll');
+        await vscode.commands.executeCommand('workbench.action.terminal.copySelection');
+        await vscode.commands.executeCommand('workbench.action.terminal.clearSelection');
+        const terminalText = await vscode.env.clipboard.readText();
+        return terminalText;
+    } catch (e) {
+        console.error("Failed to read terminal:", e);
+        return "";
+    } finally {
+        // ROBUSTNESS: Restore user's clipboard content
+        await vscode.env.clipboard.writeText(previousClipboard);
+    }
 }
 
 export function getDiagnosticsData(uri?: vscode.Uri): string {
+    // ... [Keep existing getDiagnosticsData implementation] ...
     let report = "";
-    const MAX_ERRORS_PER_FILE = 5; // Prevent huge logs
+    const MAX_ERRORS_PER_FILE = 5;
 
     if (uri) {
         const diagnostics = vscode.languages.getDiagnostics(uri);
@@ -54,10 +67,20 @@ export async function applyCompositeFix(fixes: { filePath: string, newContent: s
 
     for (const fix of fixes) {
         let targetPath = fix.filePath;
+
+        // ROBUSTNESS: Normalize paths to prevent issues with ../ or mixed separators
+        targetPath = path.normalize(targetPath);
+
         if (!path.isAbsolute(targetPath)) {
             targetPath = path.join(workspacePath, targetPath);
         }
+
         const uri = vscode.Uri.file(targetPath);
+
+        // Safe check if file exists, if not, creates it
+        edit.createFile(uri, { ignoreIfExists: true, overwrite: true });
+
+        // We use full replace as that's safer for AI generated code than calculating diffs
         const fullRange = new vscode.Range(new vscode.Position(0, 0), new vscode.Position(999999, 0));
         edit.replace(uri, fullRange, fix.newContent);
     }
@@ -66,6 +89,7 @@ export async function applyCompositeFix(fixes: { filePath: string, newContent: s
     vscode.window.showInformationMessage(`Applied changes to ${fixes.length} files.`);
 }
 
+// ... [Keep getReferencedCode, showDiffView, applyFix] ...
 export async function getReferencedCode(log: string): Promise<{ filename: string, fullPath: string, content: string } | null> {
     const match = /([\w\-\/\\.]+\.\w+)(?::\d+)?/.exec(log);
     if (match) {
@@ -91,8 +115,8 @@ export async function showDiffView(uri: vscode.Uri, newContent: string) {
 
         await vscode.commands.executeCommand(
             'vscode.diff',
-            uri,            // Left Side: Original File (Active on disk)
-            newDoc.uri,     // Right Side: Optimized Code (Virtual)
+            uri,
+            newDoc.uri,
             `Alloy Optimization: ${path.basename(uri.fsPath)} ↔ Proposed Change`
         );
 

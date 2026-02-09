@@ -3,8 +3,6 @@ import * as path from 'path';
 import * as crypto from 'crypto';
 import { glob } from 'glob';
 
-// --- CONSTANTS & REGEX (Compiled Once) ---
-
 const DEFAULT_IGNORES = [
     '**/node_modules/**', '**/bower_components/**', '**/dist/**', '**/out/**', '**/build/**',
     '**/.venv/**', '**/venv/**', '**/env/**', '**/__pycache__/**', '**/*.pyc', '**/*.pyo',
@@ -28,7 +26,6 @@ const STOP_WORDS = new Set([
     'public', 'private', 'protected', 'void', 'int', 'string', 'bool'
 ]);
 
-// Regex Patterns
 const REGEX_DEF = /(?:function|class|def|func|fn|fun|struct|interface|enum|trait|type|impl|module|package)\s+([a-zA-Z0-9_]+)/g;
 const REGEX_IMPORT_QUOTED = /(?:import|from|require|include|use)\s+(?:[\w\s{},*]*)\s*['"]([^'"]+)['"]/g;
 const REGEX_IMPORT_ANGLE = /#include\s+<([^>]+)>/g;
@@ -43,14 +40,15 @@ export interface MerkleNode {
 
 export class CodebaseIndexer {
     private root: MerkleNode | null = null;
-    private hashMap: Map<string, string> = new Map();
+    // Map path -> { hash, mtime }
+    private fileCache: Map<string, { hash: string, mtime: number }> = new Map();
     private symbolMap: Map<string, string[]> = new Map();
     private dependencyMap: Map<string, string[]> = new Map();
 
     constructor(private workspaceRoot: string, private customIgnores: string[] = []) { }
 
     async refreshIndex(): Promise<void> {
-        console.log("Refreshing Polyglot Merkle Index...");
+        console.log("Refreshing Polyglot Merkle Index (Smart Incremental)...");
         const finalIgnores = [...DEFAULT_IGNORES, ...this.customIgnores];
 
         try {
@@ -61,9 +59,21 @@ export class CodebaseIndexer {
             });
 
             this.root = await this.buildTree(this.workspaceRoot, files);
+            // Cleanup: Remove cache entries for files that no longer exist
+            this.cleanupCache(files);
+
             if (this.root) console.log(`Index Updated. Symbols: ${this.symbolMap.size}, Deps: ${this.dependencyMap.size}`);
         } catch (error) {
             console.error("❌ Indexing Failed:", error);
+        }
+    }
+
+    private cleanupCache(currentFiles: string[]) {
+        const currentSet = new Set(currentFiles.map(f => path.join(this.workspaceRoot, f)));
+        for (const cachedPath of this.fileCache.keys()) {
+            if (!currentSet.has(cachedPath)) {
+                this.fileCache.delete(cachedPath);
+            }
         }
     }
 
@@ -73,21 +83,10 @@ export class CodebaseIndexer {
         const stats = await fs.stat(currentPath);
 
         if (stats.isFile()) {
-            if (stats.size > 500 * 1024) return { hash: 'skipped_large', path: currentPath, type: 'file' }; // Skip > 500KB
+            if (stats.size > 500 * 1024) return { hash: 'skipped_large', path: currentPath, type: 'file' };
 
-            try {
-                const content = await fs.readFile(currentPath, 'utf-8');
-                const hash = this.computeHash(content);
-                const cachedHash = this.hashMap.get(currentPath);
-
-                if (cachedHash !== hash) {
-                    this.hashMap.set(currentPath, hash);
-                    this.indexContent(currentPath, content);
-                }
-                return { hash, path: currentPath, type: 'file' };
-            } catch {
-                return { hash: 'error', path: currentPath, type: 'file' };
-            }
+            const result = await this.processFile(currentPath, stats.mtimeMs);
+            return result || { hash: '', path: currentPath, type: 'file' };
         }
 
         const fileNodes: (MerkleNode | null)[] = [];
@@ -97,7 +96,14 @@ export class CodebaseIndexer {
             const batch = allFiles.slice(i, i + BATCH_SIZE);
             const batchResults = await Promise.all(batch.map(async (f) => {
                 const fullPath = path.join(this.workspaceRoot, f);
-                return this.processFile(fullPath);
+                // We need to stat each file in the batch
+                try {
+                    const fStat = await fs.stat(fullPath);
+                    if (fStat.size > 500 * 1024) return null;
+                    return this.processFile(fullPath, fStat.mtimeMs);
+                } catch {
+                    return null;
+                }
             }));
             fileNodes.push(...batchResults);
         }
@@ -108,18 +114,21 @@ export class CodebaseIndexer {
         return { hash: combinedHash, path: this.workspaceRoot, type: 'directory', children: validNodes };
     }
 
-    private async processFile(fullPath: string): Promise<MerkleNode | null> {
+    private async processFile(fullPath: string, mtimeMs: number): Promise<MerkleNode | null> {
         try {
-            const stats = await fs.stat(fullPath);
-            if (stats.size > 500 * 1024) return null;
+            const cached = this.fileCache.get(fullPath);
+
+            if (cached && cached.mtime === mtimeMs) {
+                return { hash: cached.hash, path: fullPath, type: 'file' };
+            }
 
             const content = await fs.readFile(fullPath, 'utf-8');
             const hash = this.computeHash(content);
 
-            if (this.hashMap.get(fullPath) !== hash) {
-                this.hashMap.set(fullPath, hash);
-                this.indexContent(fullPath, content);
-            }
+            this.fileCache.set(fullPath, { hash, mtime: mtimeMs });
+
+            this.indexContent(fullPath, content);
+
             return { hash, path: fullPath, type: 'file' };
         } catch {
             return null;
@@ -131,28 +140,21 @@ export class CodebaseIndexer {
     }
 
     private indexContent(filePath: string, content: string) {
-        const fileName = path.parse(filePath).name;
-
-        // 1. Index Definitions
         let match;
         while ((match = REGEX_DEF.exec(content)) !== null) this.addSymbol(match[1], filePath);
 
-        // 2. Index Dependencies
         const dependencies: string[] = [];
 
-        // A. Quoted Imports
         while ((match = REGEX_IMPORT_QUOTED.exec(content)) !== null) {
             const resolved = this.resolveImportPath(filePath, match[1]);
             if (resolved) dependencies.push(resolved);
         }
 
-        // B. Angle Bracket Imports
         while ((match = REGEX_IMPORT_ANGLE.exec(content)) !== null) {
             const resolved = this.resolveImportPath(filePath, match[1]);
             if (resolved) dependencies.push(resolved);
         }
 
-        // C. Python Style
         while ((match = REGEX_IMPORT_PYTHON.exec(content)) !== null) {
             const rawPath = match[1].replace(/\./g, '/');
             const resolved = this.resolveImportPath(filePath, rawPath);
@@ -174,18 +176,17 @@ export class CodebaseIndexer {
             const dir = path.dirname(currentFile);
             const baseResolved = path.resolve(dir, importPath);
 
-            if (this.hashMap.has(baseResolved)) return baseResolved;
+            if (this.fileCache.has(baseResolved)) return baseResolved;
 
             for (const ext of SUPPORTED_EXTENSIONS) {
                 const testPath = baseResolved + ext;
-                if (this.hashMap.has(testPath)) return testPath;
+                if (this.fileCache.has(testPath)) return testPath;
             }
 
-            // Check index files
             const indexExtensions = ['/index.js', '/index.ts', '/__init__.py', '/main.go', '/mod.rs'];
             for (const idx of indexExtensions) {
                 const testPath = baseResolved + idx;
-                if (this.hashMap.has(testPath)) return testPath;
+                if (this.fileCache.has(testPath)) return testPath;
             }
 
             return null;
@@ -194,20 +195,18 @@ export class CodebaseIndexer {
         }
     }
 
-    public async findRelevantContext(query: string): Promise<string> {
+    public async findRelevantContext(query: string): Promise<{ context: string, files: string[] }> {
         const fileScores = new Map<string, number>();
         const queryTokens = query.split(/[^a-zA-Z0-9_.-]+/).filter(t => t.length > 2 && !STOP_WORDS.has(t));
         const uniqueTokens = new Set(queryTokens);
 
-        // 1. Boost Stack Trace Matches
-        const allIndexedFiles = Array.from(this.hashMap.keys());
+        const allIndexedFiles = Array.from(this.fileCache.keys());
         const explicitFiles = allIndexedFiles.filter(f => {
             const base = path.basename(f);
             return query.includes(base) || query.includes(f);
         });
         explicitFiles.forEach(f => fileScores.set(f, 100));
 
-        // 2. Symbol Scoring
         uniqueTokens.forEach(token => {
             const filesWithSymbol = this.symbolMap.get(token);
             if (filesWithSymbol) {
@@ -223,7 +222,6 @@ export class CodebaseIndexer {
             .sort((a, b) => b[1] - a[1])
             .map(entry => entry[0]);
 
-        // 3. Graph Expansion
         const topMatches = sortedFiles.slice(0, 3);
         const expandedFiles = new Set<string>(topMatches);
 
@@ -232,8 +230,8 @@ export class CodebaseIndexer {
             imports.forEach(dep => expandedFiles.add(dep));
         }
 
-        const filesToRead = Array.from(expandedFiles).slice(0, 8); // Max 8 files
-        if (filesToRead.length === 0) return "No correlated files found.";
+        const filesToRead = Array.from(expandedFiles).slice(0, 8);
+        if (filesToRead.length === 0) return { context: "No correlated files found.", files: [] };
 
         const contents = await Promise.all(filesToRead.map(async (filePath) => {
             try {
@@ -245,6 +243,6 @@ export class CodebaseIndexer {
             }
         }));
 
-        return contents.join("");
+        return { context: contents.join(""), files: filesToRead };
     }
 }

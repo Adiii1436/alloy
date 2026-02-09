@@ -1,93 +1,103 @@
-# Alloy
+# Alloy AI
 
-**Alloy** is an **AI Pair Debugger** for VS Code designed to solve one specific problem: the tedious cycle of copying stack traces from your terminal and pasting them into ChatGPT or Claude.
+Alloy AI is a VS Code extension for debugging and code understanding with workspace-aware AI assistance.
 
-> Stop copy-pasting errors. Start fixing them.
+Instead of manually collecting logs and context, Alloy gathers terminal output, diagnostics, and related files, then proposes targeted fixes.
 
-## Overview
+## Why Alloy
 
-Unlike generic AI assistants that require you to manually explain the context or provide the error logs, Alloy autonomously monitors your terminal and Problems Tab. It traces the error back to its source-even if that source is in a completely different file-and suggests the precise fix.
+- Capture issues directly from your active terminal and the Problems panel.
+- Trace root causes across files using a local codebase index.
+- Apply AI-generated multi-file fixes without leaving VS Code.
+- Explain code and debug workflows from an integrated chat view.
 
-<img alt="reset_ui" src="media/demo_1.gif" />
+## Core Features
 
-## Key Capabilities
+- **Automated error capture**
+  - Reads active terminal output.
+  - Aggregates compiler/linter diagnostics from Problems.
+- **Crash + logic error workflows**
+  - Fixes explicit runtime/build errors.
+  - If no clear logs exist, supports manual bug descriptions (expected vs actual behavior) for logic issues.
+  - Can run your reproduce command with timeout-aware handling for interactive/long-running apps.
+- **Cross-file root-cause context**
+  - Detects referenced files from logs.
+  - Uses a local indexed dependency/symbol graph to retrieve relevant files.
+- **Integrated Debug Chat**
+  - Dedicated sidebar chat view.
+  - File attachment support for ad hoc context.
+  - Agent loop can search the codebase context and apply edits.
+- **Provider flexibility**
+  - Supports **Google Gemini**, **OpenAI**, and **Claude**.
+  - Stores provider-specific API keys and model preferences in VS Code extension state.
+- **Project control**
+  - Manage custom ignore patterns.
+  - Re-index codebase on demand.
+  - Reset provider/model/key settings or perform a full factory reset.
 
-### 1. Automated Error Capture
+## Installation
 
-Never manually copy a stack trace again.
+Install from VS Code Marketplace:
 
-- **Terminal Integration:** Alloy reads your active terminal to catch runtime crashes and exceptions.
-- **Linter Integration:** It scans the Problems tab to catch syntax errors before you even run the code.
+https://marketplace.visualstudio.com/items?itemName=aditya-anand.alloyai
 
-### 2. Root Cause Analysis
+## Quick Start
 
-A bug in your `main.ts` is often caused by a definition in `worker.ts`.
+1. Open your project in VS Code.
+2. Run `Alloy: Fix Error` or `Alloy: Explain Code` from the Command Palette.
+3. Select your AI provider on first run.
+4. Enter your provider API key when prompted.
+5. Review Alloy’s explanation and apply suggested changes.
 
-- Standard assistants fix the active file (which might be wrong).
-- **Alloy follows the trail.** It identifies the actual file causing the crash, opens it, and generates the fix right there.
+## Commands
 
-### 3. Privacy-First Design
+- `Alloy: Fix Error` (`alloyai.fixError`)
+- `Alloy: Explain Code` (`alloyai.explainCode`)
+- `Alloy: Reset Settings` (`alloyai.resetSettings`)
+- `Alloy: Manage Ignore List` (`alloyai.manageIgnores`)
+- `Alloy: Open Debug Chat` (`alloyai.openChat`)
 
-Your project structure is analyzed locally on your machine.
-- **Selective Sharing:** Only the specific code related to the error is sent to the AI for analysis. Your full codebase is never uploaded.
-- **Ignore Lists:** Easily exclude folders like `secrets/` or `node_modules/` from being tracked.
+## Settings and Controls
 
+`Alloy: Reset Settings` provides:
 
-## Getting Started
+- Switch AI provider
+- Change model
+- Update API key
+- Manage ignore list
+- Re-index codebase
+- Factory reset
 
-### 1. Installation
+<img alt="Alloy settings UI" src="media/reset_ui.png" />
 
-Install Alloy from the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=aditya-anand.alloyai).
+## How Context and Privacy Work
 
-### 2. Let it scan
+- Codebase indexing runs locally in your workspace.
+- Alloy sends only the assembled request context needed for the current task (active code, relevant indexed files, logs, and any files you attach).
+- You can exclude files/folders with custom ignore rules.
 
-When you open a folder, Alloy quickly scans your file structure to build its local understanding. This happens once and enables it to find connections between files instantly.
+## Requirements
 
-### 3. Connect AI
+- VS Code
+- API key for one of:
+  - Google Gemini
+  - OpenAI
+  - Claude (Anthropic)
 
-Alloy powers its debugging engine using Gemini/OpenAI models.
+## Development
 
-1. Run any command (e.g., `Ctrl+Shift+P` -> `AI: Fix Error`).
-2. Enter your free API Key from [Google AI Studio](https://aistudio.google.com/) when prompted.
+```bash
+npm install
+npm run compile
+```
 
-## Usage
+Useful scripts:
 
-### Fix a Crash
+- `npm run compile`
+- `npm run watch`
+- `npm run lint`
+- `npm test`
 
-1. **Scenario:** Your terminal is red with errors, or your code isn't compiling.
-2. **Action:** Open the Command Palette (`Ctrl+Shift+P`) and run `AI: Fix Error`.
-3. **Result:** Alloy analyzes the log, jumps to the broken file, and presents a diff view with the solution. You can accept or reject the change.
+## Changelog
 
-### Understand Complex Logic
-
-- **Action:** Run `AI: Explain Code`.
-- **Result:** Alloy breaks down the current file or selection, explaining why it works and how it interacts with other parts of your app.
-
-### Manage Settings
-
-Run `AI: Reset Settings` to open the dashboard:
-
-<img alt="reset_ui" src="media/reset_ui.png" />
-
-- **Reset API Key:** Change your AI credentials.
-- **Rebuild Index:** Force a re-scan of the project structure.
-- **Manage Ignore List:** Exclude files/folders from Alloy's view.
-
-## FAQ
-
-**Q: Will Alloy write my entire app?**
-
-A: No. Alloy is an AI Debugger. Its primary goal is to unblock you when you are stuck on an error. It is designed to fix broken code, not generate new features from zero.
-
-**Q: Why is this better than copy-pasting to ChatGPT?**
-
-A: Alloy has context. ChatGPT doesn't know you have a `utils.ts` file that defines the function breaking your `main.ts`. Alloy sees that connection automatically and fixes the root cause without you needing to explain the project structure.
-
-**Q: Does it work with my language?**
-
-A: Yes. Alloy's error parser is universal and supports Python, JavaScript, TypeScript, Go, Rust, Java, C++, and many others.
-
----
-
-**Debug smarter, not harder:**
-*The Alloy Team*
+See `CHANGELOG.md` for release notes.

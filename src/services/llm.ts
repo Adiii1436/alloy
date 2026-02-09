@@ -1,108 +1,89 @@
 import * as vscode from 'vscode';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import OpenAI from 'openai';
+import Anthropic from '@anthropic-ai/sdk';
 import { GlobalState } from '../globalState';
 import { LLMConfig, AIProvider, AnalysisIntent, AIResponse, FileChange } from '../types';
+
+const BASE_ROLE = "You are Alloy, an expert AI Coding Agent inside VS Code.";
+
+const CODE_FORMAT_INSTRUCTION = `
+CRITICAL INSTRUCTION:
+You have access to the file system.
+1. SEARCH: If you don't see the code you need, search for it using:
+<<<<SEARCH: query>>>>
+
+2. EDIT: To edit a file, provide the full new content in this block:
+<<<<FILE: path/to/file.ext>>>>
+[FULL SOURCE CODE HERE]
+<<<<END>>>>
+
+3. IMPORTANT: Do NOT wrap the '<<<<' blocks in markdown code fences (like \`\`\`). Output them raw.
+`;
 
 export async function getLLMConfig(): Promise<LLMConfig | null> {
     let provider = GlobalState.context.globalState.get<AIProvider>('selected_provider');
     if (!provider) {
-        const choice = await vscode.window.showQuickPick(['Google Gemini', 'OpenAI'], { placeHolder: 'Select your AI Provider' });
+        const choice = await vscode.window.showQuickPick(
+            ['Google Gemini', 'OpenAI', 'Claude'],
+            { placeHolder: 'Select your AI Provider' }
+        );
         if (!choice) return null;
         provider = choice as AIProvider;
         await GlobalState.context.globalState.update('selected_provider', provider);
     }
 
-    const keyStorageName = provider === 'Google Gemini' ? 'gemini_key' : 'openai_key';
-    let apiKey = GlobalState.context.globalState.get<string>(keyStorageName);
-    if (!apiKey) {
-        apiKey = await vscode.window.showInputBox({ prompt: `Enter your ${provider} API Key`, password: true });
-        if (!apiKey) return null;
-        await GlobalState.context.globalState.update(keyStorageName, apiKey);
+    let modelStorageName = provider === 'Google Gemini' ? 'gemini_model' : provider === 'OpenAI' ? 'openai_model' : 'claude_model';
+    let defaultModel = provider === 'Google Gemini' ? 'gemini-2.0-flash' : provider === 'OpenAI' ? 'gpt-4o' : 'claude-3-5-sonnet-20240620';
+    let modelName = GlobalState.context.globalState.get<string>(modelStorageName);
+
+    if (!modelName) {
+        modelName = defaultModel;
+        await GlobalState.context.globalState.update(modelStorageName, modelName);
     }
 
-    const modelStorageName = provider === 'Google Gemini' ? 'gemini_model' : 'openai_model';
-    let modelName = GlobalState.context.globalState.get<string>(modelStorageName);
-    if (!modelName) {
-        modelName = provider === 'Google Gemini' ? 'gemini-2.5-flash' : 'gpt-4o';
-        await GlobalState.context.globalState.update(modelStorageName, modelName);
+    let keyStorageName = '';
+    if (provider === 'Google Gemini') keyStorageName = 'gemini_key';
+    else if (provider === 'OpenAI') keyStorageName = 'openai_key';
+    else keyStorageName = 'anthropic_key';
+
+    let apiKey = GlobalState.context.globalState.get<string>(keyStorageName);
+    if (!apiKey) {
+        apiKey = await vscode.window.showInputBox({
+            prompt: `Enter your ${provider} API Key`,
+            password: true,
+            placeHolder: 'sk-...'
+        });
+        if (!apiKey) return null;
+        await GlobalState.context.globalState.update(keyStorageName, apiKey);
     }
 
     return { provider, apiKey, modelName };
 }
 
-export async function callLlm(config: LLMConfig, prompt: string, intent: AnalysisIntent): Promise<AIResponse> {
+export interface AgentResponse extends AIResponse {
+    searchQuery?: string;
+}
 
-    const BASE_ROLE = "You are Alloy, an advanced AI Pair Debugger.";
-
-    const CODE_FORMAT_INSTRUCTION = `
-    CRITICAL INSTRUCTION:
-    You are working in a real file system.
-    If you need to edit multiple files, provide a block for EACH file.
-
-    RESPONSE FORMAT:
-    For every file change, use this EXACT format:
-
-    <<<<FILE: path/to/file.ext>>>>
-    [FULL SOURCE CODE HERE]
-    <<<<END>>>>
-
-    <<<<FILE: path/to/file.ext>>>>
-    [FULL SOURCE CODE HERE]
-    <<<<END>>>>
-
-    RULES FOR THE CODE BLOCK:
-    1. Provide the FULL content of the file. DO NOT skip lines.
-    2. Inside <<<<FILE>>>> and <<<<END>>>>, contain ONLY valid code.
-    3. DO NOT write "Here is the code:" or markdown backticks (\`\`\`) inside the block.
-    `;
-
+export async function callLlm(config: LLMConfig, prompt: string, intent: AnalysisIntent | 'agent'): Promise<AgentResponse> {
     let systemInstruction = "";
-
     switch (intent) {
+        case 'agent':
+            systemInstruction = `
+            ${BASE_ROLE}
+            You are an autonomous coding agent.
+            RULES:
+            1. BE CONCISE.
+            2. To edit/fix, YOU MUST output a <<<<FILE>>>> block.
+            3. Use <<<<SEARCH: ...>>>> if needed.
+            ${CODE_FORMAT_INSTRUCTION}
+            `;
+            break;
         case 'fix':
-            systemInstruction = `
-            ${BASE_ROLE}
-            Your goal is to FIX bugs, resolve errors, or handle crashes.
-
-            INSTRUCTIONS:
-            1. Analyze the provided error logs and source code.
-            2. Identify the root cause.
-            3. Provide a COMPLETE fix for all affected files.
-            4. Start your response with a concise summary of the bug (1-2 sentences).
-
-            ${CODE_FORMAT_INSTRUCTION}
-            `;
+            systemInstruction = `${BASE_ROLE}\nYour goal is to FIX bugs.\n${CODE_FORMAT_INSTRUCTION}`;
             break;
-
-        case 'optimize':
-            systemInstruction = `
-            ${BASE_ROLE}
-            Your goal is to OPTIMIZE code for performance, readability, and best practices.
-
-            INSTRUCTIONS:
-            1. Improve Time or Space complexity where possible.
-            2. Refactor for cleaner logic and better naming.
-            3. Remove redundant code.
-            4. DO NOT change the core functionality, only improve the implementation.
-            5. MINIMIZE explanation. The user wants to see the code Diff immediately.
-
-            ${CODE_FORMAT_INSTRUCTION}
-            `;
-            break;
-
         case 'explain':
-            systemInstruction = `
-            ${BASE_ROLE}
-            Your goal is to EXPLAIN the provided code clearly and educationally.
-
-            INSTRUCTIONS:
-            1. Target your explanation to a professional developer.
-            2. Break down complex logic.
-            3. Explain *why* the code is written this way.
-            4. Use Markdown formatting (Bold, Lists, Code Blocks) for readability.
-            5. Do NOT use the special <<<<FILE>>>> format unless providing a specific refactoring example.
-            `;
+            systemInstruction = `${BASE_ROLE}\nExplain the provided code clearly to a developer.\nUse Markdown.`;
             break;
     }
 
@@ -113,7 +94,8 @@ export async function callLlm(config: LLMConfig, prompt: string, intent: Analysi
             const model = genAI.getGenerativeModel({ model: config.modelName, systemInstruction });
             const result = await model.generateContent(prompt);
             responseText = result.response.text();
-        } else {
+        }
+        else if (config.provider === 'OpenAI') {
             const openai = new OpenAI({ apiKey: config.apiKey });
             const completion = await openai.chat.completions.create({
                 messages: [
@@ -124,60 +106,71 @@ export async function callLlm(config: LLMConfig, prompt: string, intent: Analysi
             });
             responseText = completion.choices[0]?.message?.content || "";
         }
-    } catch (e: any) {
-        if (e.toString().includes('401') || e.toString().includes('invalid api key')) {
-            GlobalState.context.globalState.update(config.provider === 'Google Gemini' ? 'gemini_key' : 'openai_key', undefined);
+        else if (config.provider === 'Claude') {
+            const anthropic = new Anthropic({ apiKey: config.apiKey });
+            const message = await anthropic.messages.create({
+                model: config.modelName,
+                max_tokens: 4096,
+                system: systemInstruction,
+                messages: [{ role: "user", content: prompt }]
+            });
+            if (message.content[0].type === 'text') {
+                responseText = message.content[0].text;
+            }
         }
+    } catch (e: any) {
         throw new Error(`${config.provider} API Failed: ${e.message}`);
     }
 
     return parseBlockResponse(responseText);
 }
 
-function parseBlockResponse(text: string): AIResponse {
+function parseBlockResponse(text: string): AgentResponse {
+    const cleanedText = text.replace(/```\w*\n?<<<<FILE:/g, '<<<<FILE:')
+        .replace(/<<<<END>>>>\n?```/g, '<<<<END>>>>')
+        .replace(/```\w*\n?<<<<SEARCH:/g, '<<<<SEARCH:')
+        .replace(/>>>>\n?```/g, '>>>>');
+
     const fixes: FileChange[] = [];
     const explanationParts: string[] = [];
+    let searchQuery: string | undefined;
+
+    // 1. Parse Search Tool
+    const searchMatch = /<<<<SEARCH:\s*(.+?)>>>>/.exec(cleanedText);
+    if (searchMatch) {
+        searchQuery = searchMatch[1].trim();
+    }
 
     const fileBlockRegex = /<<<<FILE:\s*([^\n>]+)>>>>([\s\S]*?)<<<<END>>>>/g;
-
     let lastIndex = 0;
     let match;
 
-    while ((match = fileBlockRegex.exec(text)) !== null) {
-        // Capture text occurring BEFORE this code block as part of the explanation
+    let processingText = cleanedText;
+    if (searchQuery) {
+        // Remove search tag for explanation display
+        processingText = processingText.replace(searchMatch![0], '');
+    }
+
+    while ((match = fileBlockRegex.exec(processingText)) !== null) {
+        // Text before the block is explanation
         if (match.index > lastIndex) {
-            explanationParts.push(text.substring(lastIndex, match.index).trim());
+            explanationParts.push(processingText.substring(lastIndex, match.index).trim());
         }
-
-        const rawPath = match[1].trim();
-        const content = match[2].trim();
-
         fixes.push({
-            filePath: rawPath,
-            newContent: content
+            filePath: match[1].trim(),
+            newContent: match[2].trim()
         });
-
         lastIndex = match.index + match[0].length;
     }
 
-    // Capture any remaining explanation text after the last code block
-    if (lastIndex < text.length) {
-        explanationParts.push(text.substring(lastIndex).trim());
-    }
-
-    // Legacy fallback for single-file responses (just in case)
-    if (fixes.length === 0) {
-        const legacyCode = text.split('<<<<CODE>>>>')[1];
-        if (legacyCode) {
-            fixes.push({
-                filePath: "ActiveFile",
-                newContent: legacyCode.split('<<<<')[0].trim()
-            });
-        }
+    // Capture remaining text after last block
+    if (lastIndex < processingText.length) {
+        explanationParts.push(processingText.substring(lastIndex).trim());
     }
 
     return {
-        explanation: explanationParts.join('\n\n') || text,
-        fixes
+        explanation: explanationParts.join('\n\n').trim(),
+        fixes,
+        searchQuery
     };
 }

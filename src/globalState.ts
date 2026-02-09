@@ -1,11 +1,13 @@
 import * as vscode from 'vscode';
 import { CodebaseIndexer } from './services/merkle';
+import { AgentChatViewProvider } from './ui/agentChatViewProvider';
 
 export class GlobalState {
     private static _context: vscode.ExtensionContext;
     private static _statusBarItem: vscode.StatusBarItem;
     private static _indexer: CodebaseIndexer | null = null;
     private static _lastIndexTime: number = 0;
+    private static _agentChatProvider: AgentChatViewProvider | undefined;
 
     static get context() { return this._context; }
     static set context(v: vscode.ExtensionContext) { this._context = v; }
@@ -18,4 +20,7 @@ export class GlobalState {
 
     static get lastIndexTime() { return this._lastIndexTime; }
     static set lastIndexTime(v: number) { this._lastIndexTime = v; }
+
+    static get agentChatProvider() { return this._agentChatProvider; }
+    static set agentChatProvider(v: AgentChatViewProvider | undefined) { this._agentChatProvider = v; }
 }
